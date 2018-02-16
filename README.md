@@ -1,8 +1,10 @@
 Changes in this fork
 ====================
 Added support for jvm-route module. https://github.com/nulab/nginx-upstream-jvm-route
+
 Due to the nature of the changes I cannot recommend this to be added into the main project. 
 The right way to go is to rewrite the whole jvm-route module in the proper way with respect of native nginx upstream peer structures. 
+
 Although in can be useful for those who would want to use both modules. Like me :)
 
 Name
