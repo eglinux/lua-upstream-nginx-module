@@ -39,7 +39,7 @@ static int ngx_http_lua_upstream_set_peer_down(lua_State * L);
 static int ngx_http_lua_upstream_current_upstream_name(lua_State *L);
 
 static int ngx_http_lua_get_jvm_peer(lua_State *L,
-	ngx_http_upstream_jvm_route_peer_t *peer, ngx_uint_t id);
+    ngx_http_upstream_jvm_route_peer_t *peer, ngx_uint_t id);
 static ngx_http_upstream_jvm_route_peer_t *
     ngx_http_lua_upstream_lookup_jvm_peer(lua_State *L);
 
@@ -257,7 +257,7 @@ ngx_http_lua_upstream_get_primary_peers(lua_State * L)
     ngx_uint_t                            i;
     ngx_http_upstream_rr_peers_t         *peers;
     ngx_http_upstream_srv_conf_t         *us;
-	ngx_http_upstream_jvm_route_peers_t	 *jvm_peers;
+    ngx_http_upstream_jvm_route_peers_t     *jvm_peers;
 
     if (lua_gettop(L) != 1) {
         return luaL_error(L, "exactly one argument expected");
@@ -271,32 +271,32 @@ ngx_http_lua_upstream_get_primary_peers(lua_State * L)
         lua_pushliteral(L, "upstream not found");
         return 2;
     }
-	
+    
     peers = us->peer.data;
 
-	//Hack for filtering out wrongly scanned upstreams with jvm_route. 
-	//ngx_http_upstream_jvm_route_peers_t has a pointer to a different structure as a first parameter
-	//So, if the value (4 bytes of address) is to high - we definitely found a jvm_route peer.
-	//It can break only if we have more than 1000 peers for upstream
-	if ( peers->number < 0 || peers->number > 1000 ) {
+    //Hack for filtering out wrongly scanned upstreams with jvm_route. 
+    //ngx_http_upstream_jvm_route_peers_t has a pointer to a different structure as a first parameter
+    //So, if the value (4 bytes of address) is to high - we definitely found a jvm_route peer.
+    //It can break only if we have more than 1000 peers for upstream
+    if ( peers->number < 0 || peers->number > 1000 ) {
 
-		jvm_peers = (ngx_http_upstream_jvm_route_peers_t*)us->peer.data;
+        jvm_peers = (ngx_http_upstream_jvm_route_peers_t*)us->peer.data;
 
-		if (jvm_peers == NULL ) {
-			lua_pushnil(L);
-			lua_pushliteral(L, "no peer data");
-			return 2;
-		}	
-	
-		lua_createtable(L, jvm_peers->number, 0);
-		
-		for (i = 0; i < jvm_peers->number; i++) {
-	        ngx_http_lua_get_jvm_peer(L, &jvm_peers->peer[i], i);
-	        lua_rawseti(L, -2, i + 1);
+        if (jvm_peers == NULL ) {
+            lua_pushnil(L);
+            lua_pushliteral(L, "no peer data");
+            return 2;
+        }    
+    
+        lua_createtable(L, jvm_peers->number, 0);
+        
+        for (i = 0; i < jvm_peers->number; i++) {
+            ngx_http_lua_get_jvm_peer(L, &jvm_peers->peer[i], i);
+            lua_rawseti(L, -2, i + 1);
         }
-		
-		return 1;
-	}
+        
+        return 1;
+    }
 
     if (peers == NULL) {
         lua_pushnil(L);
@@ -305,7 +305,7 @@ ngx_http_lua_upstream_get_primary_peers(lua_State * L)
     }
 
     lua_createtable(L, peers->number, 0);
-	
+    
     for (i = 0; i < peers->number; i++) {
         ngx_http_lua_get_peer(L, &peers->peer[i], i);
         lua_rawseti(L, -2, i + 1);
@@ -322,7 +322,7 @@ ngx_http_lua_upstream_get_backup_peers(lua_State * L)
     ngx_uint_t                            i;
     ngx_http_upstream_rr_peers_t         *peers;
     ngx_http_upstream_srv_conf_t         *us;
-	ngx_http_upstream_jvm_route_peers_t  *jvm_peers;
+    ngx_http_upstream_jvm_route_peers_t  *jvm_peers;
 
     if (lua_gettop(L) != 1) {
         return luaL_error(L, "exactly one argument expected");
@@ -338,26 +338,26 @@ ngx_http_lua_upstream_get_backup_peers(lua_State * L)
     }
 
     peers = us->peer.data;
-	
+    
     //Hack for filtering out wrongly scanned upstreams with jvm_route. 
     //ngx_http_upstream_jvm_route_peers_t has a pointer to a different structure as a first parameter
     //So, if the value (4 bytes of address) is to high - we definitely found a jvm_route peer.
-	//It can break only if we have more than 1000 peers for upstream
-	if ( peers->number < 0 || peers->number > 1000 ) {
+    //It can break only if we have more than 1000 peers for upstream
+    if ( peers->number < 0 || peers->number > 1000 ) {
 
-		jvm_peers = (ngx_http_upstream_jvm_route_peers_t*)us->peer.data;
+        jvm_peers = (ngx_http_upstream_jvm_route_peers_t*)us->peer.data;
 
-		if (jvm_peers == NULL ) {
+        if (jvm_peers == NULL ) {
             lua_pushnil(L);
             lua_pushliteral(L, "no peer data");
             return 2;
         }
 
-		jvm_peers = jvm_peers->next;
-		if (jvm_peers == NULL) {
-        	lua_newtable(L);
-    	    return 1;
-	    }
+        jvm_peers = jvm_peers->next;
+        if (jvm_peers == NULL) {
+            lua_newtable(L);
+            return 1;
+        }
 
         lua_createtable(L, jvm_peers->number, 0);
 
@@ -367,7 +367,7 @@ ngx_http_lua_upstream_get_backup_peers(lua_State * L)
         }
 
         return 1;
-    }	
+    }    
 
     if (peers == NULL) {
         lua_pushnil(L);
@@ -395,31 +395,31 @@ ngx_http_lua_upstream_get_backup_peers(lua_State * L)
 static int
 ngx_http_lua_upstream_set_peer_down(lua_State * L)
 {
-    ngx_http_upstream_rr_peer_t					*peer;
-	ngx_http_upstream_jvm_route_peer_t			*jvm_peer;
+    ngx_http_upstream_rr_peer_t                    *peer;
+    ngx_http_upstream_jvm_route_peer_t            *jvm_peer;
 
     if (lua_gettop(L) != 4) {
         return luaL_error(L, "exactly 4 arguments expected");
     }
 
-	bool jvm_flag = false;
+    bool jvm_flag = false;
 
     peer = ngx_http_lua_upstream_lookup_peer(L,  &jvm_flag);
     if (peer == NULL) {
         return 2;
     }
 
-	if ( jvm_flag ) {
-		jvm_peer = ngx_http_lua_upstream_lookup_jvm_peer(L);
-		jvm_peer->down  = lua_toboolean(L, 4);
+    if ( jvm_flag ) {
+        jvm_peer = ngx_http_lua_upstream_lookup_jvm_peer(L);
+        jvm_peer->down  = lua_toboolean(L, 4);
 
-	} else {
-		peer->down = lua_toboolean(L, 4);
+    } else {
+        peer->down = lua_toboolean(L, 4);
 
-	    if (!peer->down) {
-			peer->fails = 0;
-		}
-	}
+        if (!peer->down) {
+            peer->fails = 0;
+        }
+    }
 
     lua_pushboolean(L, 1);
     return 1;
@@ -428,10 +428,10 @@ ngx_http_lua_upstream_set_peer_down(lua_State * L)
 static ngx_http_upstream_rr_peer_t *
 ngx_http_lua_upstream_lookup_peer(lua_State *L, bool* jvm_flag)
 {
-    int											id, backup;
-    ngx_str_t									host;
-    ngx_http_upstream_srv_conf_t				*us;
-    ngx_http_upstream_rr_peers_t				*peers;
+    int                                            id, backup;
+    ngx_str_t                                    host;
+    ngx_http_upstream_srv_conf_t                *us;
+    ngx_http_upstream_rr_peers_t                *peers;
 
     host.data = (u_char *) luaL_checklstring(L, 1, &host.len);
 
@@ -473,10 +473,10 @@ ngx_http_lua_upstream_lookup_peer(lua_State *L, bool* jvm_flag)
     //So, if the value (4 bytes of address) is to high - we definitely found a jvm_route peer.
     //It can break only if we have more than 1000 peers for upstream
     if ( peers->number < 0 || peers->number > 1000 ) {
-		*jvm_flag = true;
-	} else {
-		*jvm_flag = false;
-	}
+        *jvm_flag = true;
+    } else {
+        *jvm_flag = false;
+    }
 
     return &peers->peer[id];
 }
@@ -533,7 +533,7 @@ ngx_http_lua_get_peer(lua_State *L, ngx_http_upstream_rr_peer_t *peer,
 {
     ngx_uint_t     n;
 
-	n = 8;
+    n = 8;
 
 #if (nginx_version >= 1009000)
     n++;
