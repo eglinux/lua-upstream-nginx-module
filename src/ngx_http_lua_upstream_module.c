@@ -14,10 +14,12 @@
 #include <ngx_http.h>
 #include <lauxlib.h>
 #include "ngx_http_lua_api.h"
+#include <stdbool.h>
 
+//Headers from jvmroute module
+#include "ngx_http_upstream_jvm_route_module.h"
 
 ngx_module_t ngx_http_lua_upstream_module;
-
 
 static ngx_int_t ngx_http_lua_upstream_init(ngx_conf_t *cf);
 static int ngx_http_lua_upstream_create_module(lua_State * L);
@@ -32,10 +34,14 @@ static int ngx_http_lua_get_peer(lua_State *L,
 static ngx_http_upstream_srv_conf_t *
     ngx_http_lua_upstream_find_upstream(lua_State *L, ngx_str_t *host);
 static ngx_http_upstream_rr_peer_t *
-    ngx_http_lua_upstream_lookup_peer(lua_State *L);
+    ngx_http_lua_upstream_lookup_peer(lua_State *L, bool *jvm_flag);
 static int ngx_http_lua_upstream_set_peer_down(lua_State * L);
 static int ngx_http_lua_upstream_current_upstream_name(lua_State *L);
 
+static int ngx_http_lua_get_jvm_peer(lua_State *L,
+	ngx_http_upstream_jvm_route_peer_t *peer, ngx_uint_t id);
+static ngx_http_upstream_jvm_route_peer_t *
+    ngx_http_lua_upstream_lookup_jvm_peer(lua_State *L);
 
 static ngx_http_module_t ngx_http_lua_upstream_ctx = {
     NULL,                           /* preconfiguration */
@@ -47,7 +53,6 @@ static ngx_http_module_t ngx_http_lua_upstream_ctx = {
     NULL,                           /* create location configuration */
     NULL                            /* merge location configuration */
 };
-
 
 ngx_module_t ngx_http_lua_upstream_module = {
     NGX_MODULE_V1,
@@ -245,7 +250,6 @@ ngx_http_lua_upstream_get_servers(lua_State * L)
     return 1;
 }
 
-
 static int
 ngx_http_lua_upstream_get_primary_peers(lua_State * L)
 {
@@ -253,6 +257,7 @@ ngx_http_lua_upstream_get_primary_peers(lua_State * L)
     ngx_uint_t                            i;
     ngx_http_upstream_rr_peers_t         *peers;
     ngx_http_upstream_srv_conf_t         *us;
+	ngx_http_upstream_jvm_route_peers_t	 *jvm_peers;
 
     if (lua_gettop(L) != 1) {
         return luaL_error(L, "exactly one argument expected");
@@ -266,8 +271,32 @@ ngx_http_lua_upstream_get_primary_peers(lua_State * L)
         lua_pushliteral(L, "upstream not found");
         return 2;
     }
-
+	
     peers = us->peer.data;
+
+	//Hack for filtering out wrongly scanned upstreams with jvm_route. 
+	//ngx_http_upstream_jvm_route_peers_t has a pointer to a different structure as a first parameter
+	//So, if the value (4 bytes of address) is to high - we definitely found a jvm_route peer.
+	//It can break only if we have more than 1000 peers for upstream
+	if ( peers->number < 0 || peers->number > 1000 ) {
+
+		jvm_peers = (ngx_http_upstream_jvm_route_peers_t*)us->peer.data;
+
+		if (jvm_peers == NULL ) {
+			lua_pushnil(L);
+			lua_pushliteral(L, "no peer data");
+			return 2;
+		}	
+	
+		lua_createtable(L, jvm_peers->number, 0);
+		
+		for (i = 0; i < jvm_peers->number; i++) {
+	        ngx_http_lua_get_jvm_peer(L, &jvm_peers->peer[i], i);
+	        lua_rawseti(L, -2, i + 1);
+        }
+		
+		return 1;
+	}
 
     if (peers == NULL) {
         lua_pushnil(L);
@@ -276,7 +305,7 @@ ngx_http_lua_upstream_get_primary_peers(lua_State * L)
     }
 
     lua_createtable(L, peers->number, 0);
-
+	
     for (i = 0; i < peers->number; i++) {
         ngx_http_lua_get_peer(L, &peers->peer[i], i);
         lua_rawseti(L, -2, i + 1);
@@ -293,6 +322,7 @@ ngx_http_lua_upstream_get_backup_peers(lua_State * L)
     ngx_uint_t                            i;
     ngx_http_upstream_rr_peers_t         *peers;
     ngx_http_upstream_srv_conf_t         *us;
+	ngx_http_upstream_jvm_route_peers_t  *jvm_peers;
 
     if (lua_gettop(L) != 1) {
         return luaL_error(L, "exactly one argument expected");
@@ -308,6 +338,36 @@ ngx_http_lua_upstream_get_backup_peers(lua_State * L)
     }
 
     peers = us->peer.data;
+	
+    //Hack for filtering out wrongly scanned upstreams with jvm_route. 
+    //ngx_http_upstream_jvm_route_peers_t has a pointer to a different structure as a first parameter
+    //So, if the value (4 bytes of address) is to high - we definitely found a jvm_route peer.
+	//It can break only if we have more than 1000 peers for upstream
+	if ( peers->number < 0 || peers->number > 1000 ) {
+
+		jvm_peers = (ngx_http_upstream_jvm_route_peers_t*)us->peer.data;
+
+		if (jvm_peers == NULL ) {
+            lua_pushnil(L);
+            lua_pushliteral(L, "no peer data");
+            return 2;
+        }
+
+		jvm_peers = jvm_peers->next;
+		if (jvm_peers == NULL) {
+        	lua_newtable(L);
+    	    return 1;
+	    }
+
+        lua_createtable(L, jvm_peers->number, 0);
+
+        for (i = 0; i < jvm_peers->number; i++) {
+            ngx_http_lua_get_jvm_peer(L, &jvm_peers->peer[i], i);
+            lua_rawseti(L, -2, i + 1);
+        }
+
+        return 1;
+    }	
 
     if (peers == NULL) {
         lua_pushnil(L);
@@ -335,35 +395,43 @@ ngx_http_lua_upstream_get_backup_peers(lua_State * L)
 static int
 ngx_http_lua_upstream_set_peer_down(lua_State * L)
 {
-    ngx_http_upstream_rr_peer_t          *peer;
+    ngx_http_upstream_rr_peer_t					*peer;
+	ngx_http_upstream_jvm_route_peer_t			*jvm_peer;
 
     if (lua_gettop(L) != 4) {
         return luaL_error(L, "exactly 4 arguments expected");
     }
 
-    peer = ngx_http_lua_upstream_lookup_peer(L);
+	bool jvm_flag = false;
+
+    peer = ngx_http_lua_upstream_lookup_peer(L,  &jvm_flag);
     if (peer == NULL) {
         return 2;
     }
 
-    peer->down = lua_toboolean(L, 4);
+	if ( jvm_flag ) {
+		jvm_peer = ngx_http_lua_upstream_lookup_jvm_peer(L);
+		jvm_peer->down  = lua_toboolean(L, 4);
 
-    if (!peer->down) {
-        peer->fails = 0;
-    }
+	} else {
+		peer->down = lua_toboolean(L, 4);
+
+	    if (!peer->down) {
+			peer->fails = 0;
+		}
+	}
 
     lua_pushboolean(L, 1);
     return 1;
 }
 
-
 static ngx_http_upstream_rr_peer_t *
-ngx_http_lua_upstream_lookup_peer(lua_State *L)
+ngx_http_lua_upstream_lookup_peer(lua_State *L, bool* jvm_flag)
 {
-    int                                   id, backup;
-    ngx_str_t                             host;
-    ngx_http_upstream_srv_conf_t         *us;
-    ngx_http_upstream_rr_peers_t         *peers;
+    int											id, backup;
+    ngx_str_t									host;
+    ngx_http_upstream_srv_conf_t				*us;
+    ngx_http_upstream_rr_peers_t				*peers;
 
     host.data = (u_char *) luaL_checklstring(L, 1, &host.len);
 
@@ -400,9 +468,64 @@ ngx_http_lua_upstream_lookup_peer(lua_State *L)
         return NULL;
     }
 
+    //Hack for filtering out wrongly scanned upstreams with jvm_route. 
+    //ngx_http_upstream_jvm_route_peers_t has a pointer to a different structure as a first parameter
+    //So, if the value (4 bytes of address) is to high - we definitely found a jvm_route peer.
+    //It can break only if we have more than 1000 peers for upstream
+    if ( peers->number < 0 || peers->number > 1000 ) {
+		*jvm_flag = true;
+	} else {
+		*jvm_flag = false;
+	}
+
     return &peers->peer[id];
 }
 
+static ngx_http_upstream_jvm_route_peer_t *
+ngx_http_lua_upstream_lookup_jvm_peer(lua_State *L)
+{
+    int                                   id, backup;
+    ngx_str_t                             host;
+    ngx_http_upstream_srv_conf_t         *us;
+    ngx_http_upstream_jvm_route_peers_t  *jvm_peers;
+
+    host.data = (u_char *) luaL_checklstring(L, 1, &host.len);
+
+    us = ngx_http_lua_upstream_find_upstream(L, &host);
+    if (us == NULL) {
+        lua_pushnil(L);
+        lua_pushliteral(L, "upstream not found");
+        return NULL;
+    }
+
+    jvm_peers = us->peer.data;
+
+    if (jvm_peers == NULL) {
+        lua_pushnil(L);
+        lua_pushliteral(L, "no peer data");
+        return NULL;
+    }
+
+    backup = lua_toboolean(L, 2);
+    if (backup) {
+        jvm_peers = jvm_peers->next;
+    }
+
+    if (jvm_peers == NULL) {
+        lua_pushnil(L);
+        lua_pushliteral(L, "no backup peers");
+        return NULL;
+    }
+
+    id = luaL_checkint(L, 3);
+    if (id < 0 || (ngx_uint_t) id >= jvm_peers->number) {
+        lua_pushnil(L);
+        lua_pushliteral(L, "bad peer id");
+        return NULL;
+    }
+
+    return &jvm_peers->peer[id];
+}
 
 static int
 ngx_http_lua_get_peer(lua_State *L, ngx_http_upstream_rr_peer_t *peer,
@@ -410,7 +533,7 @@ ngx_http_lua_get_peer(lua_State *L, ngx_http_upstream_rr_peer_t *peer,
 {
     ngx_uint_t     n;
 
-    n = 8;
+	n = 8;
 
 #if (nginx_version >= 1009000)
     n++;
@@ -479,6 +602,71 @@ ngx_http_lua_get_peer(lua_State *L, ngx_http_upstream_rr_peer_t *peer,
         lua_pushinteger(L, (lua_Integer) peer->checked);
         lua_rawset(L, -3);
     }
+
+    if (peer->down) {
+        lua_pushliteral(L, "down");
+        lua_pushboolean(L, 1);
+        lua_rawset(L, -3);
+    }
+
+    return 0;
+}
+
+static int
+ngx_http_lua_get_jvm_peer(lua_State *L,ngx_http_upstream_jvm_route_peer_t *peer,
+    ngx_uint_t id)
+{
+    ngx_uint_t     n;
+
+    n = 8;
+
+#if (nginx_version >= 1009000)
+    n++;
+#endif
+
+    if (peer->down) {
+        n++;
+    }
+
+    lua_createtable(L, 0, n);
+
+    lua_pushliteral(L, "id");
+    lua_pushinteger(L, (lua_Integer) id);
+    lua_rawset(L, -3);
+
+    lua_pushliteral(L, "name");
+    lua_pushlstring(L, (char *) peer->name.data, peer->name.len);
+    lua_rawset(L, -3);
+
+    lua_pushliteral(L, "weight");
+    lua_pushinteger(L, (lua_Integer) peer->weight);
+    lua_rawset(L, -3);
+
+    lua_pushliteral(L, "current_weight");
+    lua_pushinteger(L, (lua_Integer) peer->weight);
+    lua_rawset(L, -3);
+
+    lua_pushliteral(L, "effective_weight");
+    lua_pushinteger(L, (lua_Integer) peer->weight);
+    lua_rawset(L, -3);
+
+#if (nginx_version >= 1009000)
+    lua_pushliteral(L, "conns");
+    lua_pushinteger(L, (lua_Integer) 1);
+    lua_rawset(L, -3);
+#endif
+
+    lua_pushliteral(L, "fails");
+    lua_pushinteger(L, (lua_Integer) 1);
+    lua_rawset(L, -3);
+
+    lua_pushliteral(L, "max_fails");
+    lua_pushinteger(L, (lua_Integer) peer->max_fails);
+    lua_rawset(L, -3);
+
+    lua_pushliteral(L, "fail_timeout");
+    lua_pushinteger(L, (lua_Integer) peer->fail_timeout);
+    lua_rawset(L, -3);
 
     if (peer->down) {
         lua_pushliteral(L, "down");
