@@ -652,12 +652,12 @@ ngx_http_lua_get_jvm_peer(lua_State *L,ngx_http_upstream_jvm_route_peer_t *peer,
 
 #if (nginx_version >= 1009000)
     lua_pushliteral(L, "conns");
-    lua_pushinteger(L, (lua_Integer) 1);
+    lua_pushinteger(L, (lua_Integer) peer->shared->nreq);
     lua_rawset(L, -3);
 #endif
 
     lua_pushliteral(L, "fails");
-    lua_pushinteger(L, (lua_Integer) 1);
+    lua_pushinteger(L, (lua_Integer) peer->shared->fails);
     lua_rawset(L, -3);
 
     lua_pushliteral(L, "max_fails");
